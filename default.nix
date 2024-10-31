@@ -1,12 +1,22 @@
 { pkgs ? import <nixpkgs> { } }:
-pkgs.rustPlatform.buildRustPackage {
+pkgs.rustPlatform.buildRustPackage rec {
   pname = "galaxy";
   version = "0.1.0";
 
-  buildInputs = with pkgs; [
-    SDL2
-  ];
-
   src = pkgs.lib.cleanSource ./.;
   cargoLock.lockFile = ./Cargo.lock;
+
+  nativeBuildInputs = with pkgs; [
+    rustfmt
+  ];
+
+  buildInputs = with pkgs; [
+    xorg.libX11
+    xorg.libXcursor
+    xorg.libXrandr
+    xorg.libXi
+    libGL
+  ];
+
+  LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}";
 }
