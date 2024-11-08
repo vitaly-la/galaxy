@@ -1,18 +1,30 @@
 use kiss3d::nalgebra::Vector3;
-use rand::rngs::ThreadRng;
-use rand::Rng;
+use std::f64::consts::PI;
 
 struct Particle {
-    pos: Vector3<f64>,
-    vel: Vector3<f64>,
+    phase: f64,
+    velocity: f64,
 }
 
 impl Particle {
-    fn new(rng: &mut ThreadRng) -> Self {
+    fn new() -> Self {
         Particle {
-            pos: Vector3::new(rng.gen(), rng.gen(), rng.gen()),
-            vel: Vector3::new(rng.gen(), rng.gen(), rng.gen()),
+            phase: 0.0,
+            velocity: 1.0,
         }
+    }
+
+    fn coord(&self, time: f64) -> Vector3<f64> {
+        let mean_anomaly = (self.phase + self.velocity * time).rem_euclid(2.0 * PI);
+
+        let ecc = 0_f64;
+
+        let true_anomaly = mean_anomaly
+            + (2.0 * ecc - 0.25 * ecc.powi(3)) * mean_anomaly.sin()
+            + 1.25 * ecc.powi(2) * (2.0 * mean_anomaly).sin()
+            + 13.0 / 12.0 * ecc.powi(3) * (3.0 * mean_anomaly).sin();
+
+        Vector3::new(0.0, 0.0, 0.0)
     }
 }
 
@@ -22,11 +34,9 @@ pub struct System {
 
 impl System {
     pub fn new(n_particles: usize) -> Self {
-        let mut rng = rand::thread_rng();
-
-        let mut particles = Vec::<Particle>::new();
+        let mut particles = vec![];
         for _ in 0..n_particles {
-            particles.push(Particle::new(&mut rng));
+            particles.push(Particle::new());
         }
 
         System { particles }
