@@ -6,9 +6,7 @@ pkgs.rustPlatform.buildRustPackage rec {
   src = pkgs.lib.cleanSource ./.;
   cargoLock.lockFile = ./Cargo.lock;
 
-  nativeBuildInputs = with pkgs; [
-    rustfmt
-  ];
+  nativeBuildInputs = [ pkgs.rustup ];
 
   buildInputs = with pkgs; [
     xorg.libX11
