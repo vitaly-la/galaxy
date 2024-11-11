@@ -6,7 +6,7 @@ pkgs.rustPlatform.buildRustPackage rec {
   src = pkgs.lib.cleanSource ./.;
   cargoLock.lockFile = ./Cargo.lock;
 
-  nativeBuildInputs = [ pkgs.rustup ];
+  nativeBuildInputs = with pkgs; [ rustfmt clippy rust-analyzer ];
 
   buildInputs = with pkgs; [
     xorg.libX11

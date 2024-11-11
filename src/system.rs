@@ -1,51 +1,90 @@
-use kiss3d::nalgebra::Vector3;
 use std::f64::consts::PI;
 
-pub struct Particle {
+use kiss3d::nalgebra::{Rotation3, Vector3};
+
+use rand::Rng;
+
+fn ecc_from_mean(mean_anomaly: f64, ecc: f64, precision: f64) -> f64 {
+    let mut ecc_anomaly = mean_anomaly;
+    let mut old_value;
+    loop {
+        old_value = ecc_anomaly;
+        ecc_anomaly = mean_anomaly + ecc * ecc_anomaly.sin();
+        if (ecc_anomaly - old_value).abs() < precision {
+            break;
+        }
+    }
+    ecc_anomaly
+}
+
+struct Particle {
+    radius: f64,
     phase: f64,
     velocity: f64,
+    ecc: f64,
+    semi_major: f64,
+    euler_a: f64,
+    euler_b: f64,
+    euler_g: f64,
 }
 
 impl Particle {
     fn new() -> Self {
+        let mut rng = rand::thread_rng();
         Particle {
-            phase: 0.0,
-            velocity: 4.0,
+            radius: 0.02,
+            phase: 2.0 * PI * rng.gen::<f64>(),
+            velocity: 2.5 + 2.5 * rng.gen::<f64>(),
+            ecc: 0.75 * rng.gen::<f64>(),
+            semi_major: 0.25,
+            euler_a: 2.0 * PI * rng.gen::<f64>(),
+            euler_b: 2.0 * PI * rng.gen::<f64>(),
+            euler_g: 2.0 * PI * rng.gen::<f64>(),
         }
     }
 
-    pub fn coord(&self, time: f64) -> Vector3<f64> {
+    fn coord(&self, time: f64) -> Vector3<f64> {
         let mean_anomaly = (self.phase + self.velocity * time).rem_euclid(2.0 * PI);
 
-        let ecc: f64 = 0.25;
-        let semi_major: f64 = 0.2;
+        let ecc_anomaly = ecc_from_mean(mean_anomaly, self.ecc, 0.0001);
 
-        let true_anomaly = mean_anomaly
-            + (2.0 * ecc - 0.25 * ecc.powi(3)) * mean_anomaly.sin()
-            + 1.25 * ecc.powi(2) * (2.0 * mean_anomaly).sin()
-            + 13.0 / 12.0 * ecc.powi(3) * (3.0 * mean_anomaly).sin();
+        let beta = self.ecc / (1.0 + (1.0 - self.ecc * self.ecc).sqrt());
+        let true_anomaly = ecc_anomaly
+            + 2.0 * (beta * ecc_anomaly.sin() / (1.0 - beta * ecc_anomaly.cos())).atan();
 
-        let radius = semi_major * (1.0 - ecc.powi(2)) / (1.0 + ecc * true_anomaly.cos());
+        let radius =
+            self.semi_major * (1.0 - self.ecc.powi(2)) / (1.0 + self.ecc * true_anomaly.cos());
 
-        Vector3::new(
-            radius * true_anomaly.cos(),
-            radius * true_anomaly.sin(),
+        let local_coord = Vector3::new(
+            -radius * true_anomaly.cos(),
             0.0,
-        )
+            radius * true_anomaly.sin(),
+        );
+
+        Rotation3::from_euler_angles(self.euler_a, self.euler_b, self.euler_g) * local_coord
     }
 }
 
 pub struct System {
-    pub particles: Vec<Particle>,
+    pub size: usize,
+    particles: Vec<Particle>,
 }
 
 impl System {
-    pub fn new(n_particles: usize) -> Self {
+    pub fn new(size: usize) -> Self {
         let mut particles = vec![];
-        for _ in 0..n_particles {
+        for _ in 0..size {
             particles.push(Particle::new());
         }
 
-        System { particles }
+        System { size, particles }
+    }
+
+    pub fn particle_coord(&self, i: usize, time: f64) -> Vector3<f32> {
+        self.particles[i].coord(time).map(|x| x as f32)
+    }
+
+    pub fn particle_radius(&self, i: usize) -> f32 {
+        self.particles[i].radius as f32
     }
 }
