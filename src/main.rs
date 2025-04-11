@@ -12,7 +12,7 @@ fn main() {
     let system = System::new(10);
     let start = Instant::now();
 
-    let mut window = Window::new("Galaxy.rs");
+    let mut window = Window::new("galaxy");
     window.set_light(Light::StickToCamera);
 
     let mut spheres = vec![];

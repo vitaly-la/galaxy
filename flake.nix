@@ -1,17 +1,38 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs }:
-    let
-      supportedSystems = [ "x86_64-linux" ];
-      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-      pkgsFor = nixpkgs.legacyPackages;
-    in
-    {
-      packages = forAllSystems (system: {
-        default = pkgsFor.${system}.callPackage ./. { };
-      });
-    };
+  outputs = { self, flake-utils, nixpkgs }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        packages.default = pkgs.rustPlatform.buildRustPackage rec {
+          name = "galaxy";
+
+          cargoLock.lockFile = ./Cargo.lock;
+
+          src = ./.;
+
+          nativeBuildInputs = with pkgs; [ makeWrapper rustfmt clippy rust-analyzer ];
+
+          buildInputs = with pkgs; [
+            xorg.libX11
+            xorg.libXcursor
+            xorg.libXrandr
+            xorg.libXi
+            libGL
+          ];
+
+          LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}";
+
+          postInstall = ''
+            wrapProgram $out/bin/galaxy --set LD_LIBRARY_PATH "${LD_LIBRARY_PATH}"
+          '';
+        };
+      }
+    );
 }

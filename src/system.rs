@@ -30,16 +30,16 @@ struct Particle {
 
 impl Particle {
     fn new() -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         Particle {
             radius: 0.02,
-            phase: 2.0 * PI * rng.gen::<f64>(),
-            velocity: 2.5 + 2.5 * rng.gen::<f64>(),
-            ecc: 0.75 * rng.gen::<f64>(),
+            phase: 2.0 * PI * rng.random::<f64>(),
+            velocity: 2.5 + 2.5 * rng.random::<f64>(),
+            ecc: 0.75 * rng.random::<f64>(),
             semi_major: 0.25,
-            euler_a: 2.0 * PI * rng.gen::<f64>(),
-            euler_b: 2.0 * PI * rng.gen::<f64>(),
-            euler_g: 2.0 * PI * rng.gen::<f64>(),
+            euler_a: 2.0 * PI * rng.random::<f64>(),
+            euler_b: 2.0 * PI * rng.random::<f64>(),
+            euler_g: 2.0 * PI * rng.random::<f64>(),
         }
     }
 
