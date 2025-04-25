@@ -495,6 +495,7 @@ name = "galaxy"
 version = "0.1.0"
 dependencies = [
  "kiss3d",
+ "ncollide3d",
  "rand",
 ]
 

@@ -4,7 +4,16 @@ use std::time::Duration;
 
 use kiss3d::nalgebra::{Rotation3, Vector3};
 
+use ncollide3d::bounding_volume;
+use ncollide3d::broad_phase::DBVTBroadPhase;
+use ncollide3d::na;
+use ncollide3d::na::Isometry3;
+use ncollide3d::pipeline::broad_phase::{BroadPhase, BroadPhaseInterferenceHandler};
+use ncollide3d::shape::Ball;
+
 use rand::Rng;
+
+const RADIUS: f64 = 0.01;
 
 fn ecc_from_mean(mean_anomaly: f64, ecc: f64) -> f64 {
     let mut ecc_anomaly = mean_anomaly;
@@ -28,11 +37,11 @@ struct Particle {
 impl Particle {
     fn new() -> Self {
         let mut rng = rand::rng();
-        let ecc = 0.5;
+        let ecc = 0.0;
         let semi_major: f64 = 0.25;
-        let velocity = semi_major.powi(-2).cbrt();
+        let velocity = semi_major.powi(-2).cbrt() * (1.0 + 0.1 * rng.random::<f64>());
         Particle {
-            radius: 0.02,
+            radius: RADIUS,
             phase: 2.0 * PI * rng.random::<f64>(),
             velocity,
             ecc,
@@ -73,7 +82,7 @@ pub struct System {
 impl System {
     pub fn new() -> Self {
         let mut particles = HashMap::new();
-        for i in 0..10 {
+        for i in 0..100 {
             particles.insert(i, Particle::new());
         }
 
@@ -103,23 +112,55 @@ impl System {
 
     pub fn run(&mut self, elapsed: Duration) {
         self.time += elapsed;
-        let mut intersections = vec![];
-        for (i, p1) in self.particles.iter() {
-            for (j, p2) in self.particles.iter() {
-                if i < j {
-                    let p1_coord = p1.coord(self.time.as_secs_f64());
-                    let p2_coord = p2.coord(self.time.as_secs_f64());
-                    let distance = (p1_coord - p2_coord).norm();
-                    if distance < p1.radius + p2.radius {
-                        intersections.push((*i, *j));
-                    }
+
+        let mut bf = DBVTBroadPhase::new(RADIUS);
+        for (i, particle) in self.particles.iter() {
+            let coord = particle.coord(self.time.as_secs_f64());
+            bf.create_proxy(
+                bounding_volume::aabb(
+                    &Ball::new(particle.radius),
+                    &Isometry3::new(coord, na::zero()),
+                ),
+                i.clone(),
+            );
+        }
+
+        struct Handler<'a> {
+            intersections: Vec<(usize, usize)>,
+            particles: &'a HashMap<usize, Particle>,
+            time: Duration,
+        }
+
+        impl<'a> BroadPhaseInterferenceHandler<usize> for Handler<'a> {
+            fn is_interference_allowed(&mut self, _: &usize, _: &usize) -> bool {
+                true
+            }
+
+            fn interference_started(&mut self, a: &usize, b: &usize) {
+                let p1_coord = self.particles[&a].coord(self.time.as_secs_f64());
+                let p2_coord = self.particles[&b].coord(self.time.as_secs_f64());
+                let distance = (p1_coord - p2_coord).norm();
+                if distance < self.particles[&a].radius + self.particles[&b].radius {
+                    self.intersections.push((*a, *b));
                 }
             }
+
+            fn interference_stopped(&mut self, _: &usize, _: &usize) {}
         }
-        for (i, j) in intersections {
-            self.particles.get_mut(&i).unwrap().radius =
-                (self.particles[&i].radius.powi(3) + self.particles[&j].radius.powi(3)).cbrt();
-            self.particles.remove(&j);
+
+        let mut handler = Handler {
+            intersections: vec![],
+            particles: &self.particles,
+            time: self.time,
+        };
+        bf.update(&mut handler);
+
+        for (i, j) in handler.intersections {
+            if self.particles.contains_key(&i) && self.particles.contains_key(&j) {
+                self.particles.get_mut(&i).unwrap().radius =
+                    (self.particles[&i].radius.powi(3) + self.particles[&j].radius.powi(3)).cbrt();
+                self.particles.remove(&j);
+            }
         }
     }
 }
