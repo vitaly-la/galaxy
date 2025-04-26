@@ -4,15 +4,14 @@ use std::time::Duration;
 
 use kiss3d::nalgebra::{Rotation3, Vector3};
 
-use ncollide3d::bounding_volume;
+use ncollide3d::bounding_volume::ball_aabb;
 use ncollide3d::broad_phase::DBVTBroadPhase;
-use ncollide3d::na;
-use ncollide3d::na::Isometry3;
+use ncollide3d::na::Point;
 use ncollide3d::pipeline::broad_phase::{BroadPhase, BroadPhaseInterferenceHandler};
-use ncollide3d::shape::Ball;
 
 use rand::Rng;
 
+const G: f64 = 0.1;
 const RADIUS: f64 = 0.01;
 
 fn ecc_from_mean(mean_anomaly: f64, ecc: f64) -> f64 {
@@ -23,15 +22,28 @@ fn ecc_from_mean(mean_anomaly: f64, ecc: f64) -> f64 {
     ecc_anomaly
 }
 
+fn collide(a: &Particle, b: &Particle, _time: Duration) -> Particle {
+    let radius = (a.radius.powi(3) + b.radius.powi(3)).cbrt();
+
+    Particle {
+        radius,
+        ecc: a.ecc,
+        semi_major: a.semi_major,
+        phase: a.phase,
+        mean_motion: a.mean_motion,
+        heading: a.heading,
+        angle: a.angle,
+    }
+}
+
 struct Particle {
     radius: f64,
-    phase: f64,
-    velocity: f64,
     ecc: f64,
     semi_major: f64,
-    euler_a: f64,
-    euler_b: f64,
-    euler_g: f64,
+    phase: f64,
+    mean_motion: f64,
+    heading: f64,
+    angle: Vector3<f64>,
 }
 
 impl Particle {
@@ -39,21 +51,26 @@ impl Particle {
         let mut rng = rand::rng();
         let ecc = 0.0;
         let semi_major: f64 = 0.25;
-        let velocity = semi_major.powi(-2).cbrt() * (1.0 + 0.1 * rng.random::<f64>());
+        let mean_motion = (G / semi_major.powi(3)).sqrt();
+
         Particle {
             radius: RADIUS,
-            phase: 2.0 * PI * rng.random::<f64>(),
-            velocity,
             ecc,
             semi_major,
-            euler_a: 2.0 * PI * rng.random::<f64>(),
-            euler_b: 2.0 * PI * rng.random::<f64>(),
-            euler_g: 2.0 * PI * rng.random::<f64>(),
+            phase: 2.0 * PI * rng.random::<f64>(),
+            mean_motion,
+            heading: 0.0,
+            angle: Vector3::new(
+                rng.random::<f64>() - 0.5,
+                rng.random::<f64>() - 0.5,
+                rng.random::<f64>() - 0.5,
+            )
+            .normalize(),
         }
     }
 
     fn coord(&self, time: f64) -> Vector3<f64> {
-        let mean_anomaly = (self.phase + self.velocity * time).rem_euclid(2.0 * PI);
+        let mean_anomaly = (self.phase + self.mean_motion * time).rem_euclid(2.0 * PI);
 
         let ecc_anomaly = ecc_from_mean(mean_anomaly, self.ecc);
 
@@ -70,7 +87,9 @@ impl Particle {
             radius * true_anomaly.sin(),
         );
 
-        Rotation3::from_euler_angles(self.euler_a, self.euler_b, self.euler_g) * local_coord
+        Rotation3::rotation_between(&Vector3::y_axis(), &self.angle).unwrap()
+            * Rotation3::from_axis_angle(&Vector3::y_axis(), self.heading)
+            * local_coord
     }
 }
 
@@ -82,7 +101,7 @@ pub struct System {
 impl System {
     pub fn new() -> Self {
         let mut particles = HashMap::new();
-        for i in 0..100 {
+        for i in 0..1000 {
             particles.insert(i, Particle::new());
         }
 
@@ -113,16 +132,10 @@ impl System {
     pub fn run(&mut self, elapsed: Duration) {
         self.time += elapsed;
 
-        let mut bf = DBVTBroadPhase::new(RADIUS);
+        let mut bf = DBVTBroadPhase::new(0.02 * RADIUS);
         for (i, particle) in self.particles.iter() {
             let coord = particle.coord(self.time.as_secs_f64());
-            bf.create_proxy(
-                bounding_volume::aabb(
-                    &Ball::new(particle.radius),
-                    &Isometry3::new(coord, na::zero()),
-                ),
-                i.clone(),
-            );
+            bf.create_proxy(ball_aabb(&Point::from(coord), particle.radius), i.clone());
         }
 
         struct Handler<'a> {
@@ -137,9 +150,9 @@ impl System {
             }
 
             fn interference_started(&mut self, a: &usize, b: &usize) {
-                let p1_coord = self.particles[&a].coord(self.time.as_secs_f64());
-                let p2_coord = self.particles[&b].coord(self.time.as_secs_f64());
-                let distance = (p1_coord - p2_coord).norm();
+                let a_coord = self.particles[&a].coord(self.time.as_secs_f64());
+                let b_coord = self.particles[&b].coord(self.time.as_secs_f64());
+                let distance = (a_coord - b_coord).norm();
                 if distance < self.particles[&a].radius + self.particles[&b].radius {
                     self.intersections.push((*a, *b));
                 }
@@ -155,11 +168,11 @@ impl System {
         };
         bf.update(&mut handler);
 
-        for (i, j) in handler.intersections {
-            if self.particles.contains_key(&i) && self.particles.contains_key(&j) {
-                self.particles.get_mut(&i).unwrap().radius =
-                    (self.particles[&i].radius.powi(3) + self.particles[&j].radius.powi(3)).cbrt();
-                self.particles.remove(&j);
+        for (a, b) in handler.intersections {
+            if self.particle_active(a) && self.particle_active(b) {
+                *self.particles.get_mut(&a).unwrap() =
+                    collide(&self.particles[&a], &self.particles[&b], self.time);
+                self.particles.remove(&b);
             }
         }
     }
