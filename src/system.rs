@@ -11,7 +11,7 @@ use ncollide3d::pipeline::broad_phase::{BroadPhase, BroadPhaseInterferenceHandle
 
 use rand::Rng;
 
-const G: f64 = 0.1;
+const G: f64 = 0.01;
 const RADIUS: f64 = 0.01;
 
 fn ecc_from_mean(mean_anomaly: f64, ecc: f64) -> f64 {
@@ -22,8 +22,26 @@ fn ecc_from_mean(mean_anomaly: f64, ecc: f64) -> f64 {
     ecc_anomaly
 }
 
-fn collide(a: &Particle, b: &Particle, _time: Duration) -> Particle {
-    let radius = (a.radius.powi(3) + b.radius.powi(3)).cbrt();
+fn collide(a: &Particle, b: &Particle, time: Duration) -> Particle {
+    let mass_a = a.radius.powi(3);
+    let mass_b = b.radius.powi(3);
+    let mass = mass_a + mass_b;
+    let radius = mass.cbrt();
+
+    let coord_a = a.coord(time.as_secs_f64());
+    let coord_b = b.coord(time.as_secs_f64());
+    let coord = (mass_a * coord_a + mass_b * coord_b) / mass;
+
+    let momentum_a = mass_a * a.velocity(time.as_secs_f64());
+    let momentum_b = mass_b * b.velocity(time.as_secs_f64());
+    let momentum = momentum_a + momentum_b;
+    let velocity = momentum / mass;
+
+    let angle = coord.cross(&velocity).normalize();
+    let almost_local_coord = Rotation3::rotation_between(&Vector3::y_axis(), &angle).unwrap().inverse() * coord;
+    let almost_local_velocity = Rotation3::rotation_between(&Vector3::y_axis(), &angle).unwrap().inverse() * velocity;
+
+    _ = (almost_local_coord, almost_local_velocity);
 
     Particle {
         radius,
@@ -32,7 +50,7 @@ fn collide(a: &Particle, b: &Particle, _time: Duration) -> Particle {
         phase: a.phase,
         mean_motion: a.mean_motion,
         heading: a.heading,
-        angle: a.angle,
+        angle,
     }
 }
 
@@ -52,6 +70,7 @@ impl Particle {
         let ecc = 0.0;
         let semi_major: f64 = 0.25;
         let mean_motion = (G / semi_major.powi(3)).sqrt();
+        let angle = Vector3::new(rng.random::<f64>() - 0.5, rng.random::<f64>() - 0.5, rng.random::<f64>() - 0.5).normalize();
 
         Particle {
             radius: RADIUS,
@@ -60,12 +79,7 @@ impl Particle {
             phase: 2.0 * PI * rng.random::<f64>(),
             mean_motion,
             heading: 0.0,
-            angle: Vector3::new(
-                rng.random::<f64>() - 0.5,
-                rng.random::<f64>() - 0.5,
-                rng.random::<f64>() - 0.5,
-            )
-            .normalize(),
+            angle,
         }
     }
 
@@ -75,21 +89,47 @@ impl Particle {
         let ecc_anomaly = ecc_from_mean(mean_anomaly, self.ecc);
 
         let beta = self.ecc / (1.0 + (1.0 - self.ecc * self.ecc).sqrt());
-        let true_anomaly = ecc_anomaly
-            + 2.0 * (beta * ecc_anomaly.sin() / (1.0 - beta * ecc_anomaly.cos())).atan();
+        let true_anomaly = ecc_anomaly + 2.0 * (beta * ecc_anomaly.sin() / (1.0 - beta * ecc_anomaly.cos())).atan();
 
-        let radius =
-            self.semi_major * (1.0 - self.ecc.powi(2)) / (1.0 + self.ecc * true_anomaly.cos());
+        let radius = self.semi_major * (1.0 - self.ecc.powi(2)) / (1.0 + self.ecc * true_anomaly.cos());
 
-        let local_coord = Vector3::new(
-            -radius * true_anomaly.cos(),
-            0.0,
-            radius * true_anomaly.sin(),
-        );
+        let local_coord = Vector3::new(-radius * true_anomaly.cos(), 0.0, radius * true_anomaly.sin());
 
         Rotation3::rotation_between(&Vector3::y_axis(), &self.angle).unwrap()
             * Rotation3::from_axis_angle(&Vector3::y_axis(), self.heading)
             * local_coord
+    }
+
+    fn velocity(&self, time: f64) -> Vector3<f64> {
+        let mean_anomaly = (self.phase + self.mean_motion * time).rem_euclid(2.0 * PI);
+
+        let ecc_anomaly = ecc_from_mean(mean_anomaly, self.ecc);
+        let d_ecc_dt = self.mean_motion / (1.0 - self.ecc * ecc_anomaly.cos());
+
+        let beta = self.ecc / (1.0 + (1.0 - self.ecc * self.ecc).sqrt());
+
+        let subterm = 1.0 - beta * ecc_anomaly.cos();
+        let d_subterm_dt = beta * ecc_anomaly.sin() * d_ecc_dt;
+
+        let term = beta * ecc_anomaly.sin() / subterm;
+        let d_term_dt = beta * (ecc_anomaly.cos() * d_ecc_dt * subterm - ecc_anomaly.sin() * d_subterm_dt) / subterm.powi(2);
+
+        let true_anomaly = ecc_anomaly + 2.0 * term.atan();
+        let d_true_dt = d_ecc_dt + 2.0 / (1.0 + term.powi(2)) * d_term_dt;
+
+        let radius = self.semi_major * (1.0 - self.ecc.powi(2)) / (1.0 + self.ecc * true_anomaly.cos());
+        let d_radius_dt = self.semi_major * (1.0 - self.ecc.powi(2)) * self.ecc * true_anomaly.sin() * d_true_dt
+            / (1.0 + self.ecc * true_anomaly.cos()).powi(2);
+
+        let local_velocity = Vector3::new(
+            -d_radius_dt * true_anomaly.cos() + radius * true_anomaly.sin() * d_true_dt,
+            0.0,
+            d_radius_dt * true_anomaly.sin() + radius * true_anomaly.cos() * d_true_dt,
+        );
+
+        Rotation3::rotation_between(&Vector3::y_axis(), &self.angle).unwrap()
+            * Rotation3::from_axis_angle(&Vector3::y_axis(), self.heading)
+            * local_velocity
     }
 }
 
@@ -101,7 +141,7 @@ pub struct System {
 impl System {
     pub fn new() -> Self {
         let mut particles = HashMap::new();
-        for i in 0..1000 {
+        for i in 0..10 {
             particles.insert(i, Particle::new());
         }
 
@@ -120,9 +160,7 @@ impl System {
     }
 
     pub fn particle_coord(&self, i: usize) -> Vector3<f32> {
-        self.particles[&i]
-            .coord(self.time.as_secs_f64())
-            .map(|x| x as f32)
+        self.particles[&i].coord(self.time.as_secs_f64()).map(|x| x as f32)
     }
 
     pub fn particle_radius(&self, i: usize) -> f32 {
@@ -170,8 +208,7 @@ impl System {
 
         for (a, b) in handler.intersections {
             if self.particle_active(a) && self.particle_active(b) {
-                *self.particles.get_mut(&a).unwrap() =
-                    collide(&self.particles[&a], &self.particles[&b], self.time);
+                *self.particles.get_mut(&a).unwrap() = collide(&self.particles[&a], &self.particles[&b], self.time);
                 self.particles.remove(&b);
             }
         }
