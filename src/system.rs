@@ -41,14 +41,20 @@ fn collide(a: &Particle, b: &Particle, time: Duration) -> Particle {
     let almost_local_coord = Rotation3::rotation_between(&Vector3::y_axis(), &angle).unwrap().inverse() * coord;
     let almost_local_velocity = Rotation3::rotation_between(&Vector3::y_axis(), &angle).unwrap().inverse() * velocity;
 
-    _ = (almost_local_coord, almost_local_velocity);
+    let semi_major = G * almost_local_coord.norm() / (2.0 * G - almost_local_coord.norm() * almost_local_velocity.norm().powi(2));
+    let mean_motion = (G / semi_major.powi(3)).sqrt();
+
+    let h = coord.cross(&velocity);
+    let ecc = (coord / coord.norm() - velocity.cross(&h) / G).norm();
+
+    // Something is wrong here
 
     Particle {
         radius,
-        ecc: a.ecc,
-        semi_major: a.semi_major,
+        ecc,
+        semi_major,
         phase: a.phase,
-        mean_motion: a.mean_motion,
+        mean_motion,
         heading: a.heading,
         angle,
     }
