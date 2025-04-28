@@ -25,6 +25,7 @@
             xorg.libXrandr
             xorg.libXi
             libGL
+            llvmPackages.libclang.lib
           ];
 
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}";

@@ -7,5 +7,6 @@ edition = "2021"
 
 [dependencies]
 kiss3d = { version = "0.35.0", default-features = false }
-ncollide3d = "0.33.0"
+ncollide3d = { version = "0.33.0", default-features = false }
 rand = { version = "0.9.0", default-features = false, features = ["thread_rng"] }
+rastro = { version = "0.1.8", default-features = false }
