@@ -13,8 +13,9 @@ use rand::Rng;
 
 use rastro::orbits::{anomaly_eccentric_to_true, anomaly_true_to_mean, mean_motion_general};
 
+const CENTRAL_BODY: f64 = 0.005;
 const GRAVITY: f64 = 0.01;
-const RADIUS: f64 = 0.005;
+const RADIUS: f64 = 0.0025;
 
 fn anomaly_mean_to_eccentric(mean_anomaly: f64, ecc: f64, _degrees: bool) -> f64 {
     let mut ecc_anomaly = if ecc < 0.8 { mean_anomaly } else { PI };
@@ -95,8 +96,9 @@ impl Particle {
         let ecc = 0.25 * rng.random::<f64>();
         let semi_major: f64 = 0.125 + 0.25 * rng.random::<f64>();
         let mean_motion = mean_motion_general(semi_major, GRAVITY, false);
-        let angle =
-            (Vector3::y() + Vector3::new(rng.random::<f64>() - 0.5, rng.random::<f64>() - 0.5, rng.random::<f64>() - 0.5)).normalize();
+        let angle = (0.5_f64 * Vector3::y()
+            + Vector3::new(rng.random::<f64>() - 0.5, rng.random::<f64>() - 0.5, rng.random::<f64>() - 0.5))
+        .normalize();
 
         Particle {
             radius: RADIUS,
@@ -182,10 +184,15 @@ impl System {
         self.time += elapsed;
 
         let mut bf = DBVTBroadPhase::new(0.02 * RADIUS);
-        for (i, particle) in self.particles.iter() {
+        self.particles.retain(|i, particle| {
             let coord = particle.coord(self.time.as_secs_f64());
-            bf.create_proxy(ball_aabb(&Point::from(coord), particle.radius), i.clone());
-        }
+            if coord.norm() > particle.radius + CENTRAL_BODY {
+                bf.create_proxy(ball_aabb(&Point::from(coord), particle.radius), i.clone());
+                true
+            } else {
+                false
+            }
+        });
 
         struct Handler<'a> {
             intersections: Vec<(usize, usize)>,
@@ -220,9 +227,6 @@ impl System {
         for (a, b) in handler.intersections {
             if self.particle_active(a) && self.particle_active(b) {
                 *self.particles.get_mut(&a).unwrap() = collide(&self.particles[&a], &self.particles[&b], self.time);
-                if self.particles[&a].ecc > 0.9 || self.particles[&b].semi_major < 0.1 {
-                    self.particles.remove(&a);
-                }
                 self.particles.remove(&b);
             }
         }
